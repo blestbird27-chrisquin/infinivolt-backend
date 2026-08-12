@@ -3,6 +3,8 @@ import uuid
 import tempfile
 import subprocess
 import requests
+import hmac
+import hashlib
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request, UploadFile, File, Form, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -291,6 +293,49 @@ def read_root():
         "service": "InfiniVolt Hubtel USSD, Khaya Voice AI & Payment Core",
         "version": "2.2.0"
     }
+
+# ================= PAYSTACK WEBHOOK LISTENER =================
+@app.post("/api/paystack/webhook")
+async def paystack_webhook(request: Request):
+    """
+    Receives real-time notifications from Paystack when a transaction is completed or fails.
+    Validates HMAC SHA512 signature using PAYSTACK_SECRET_KEY to ensure authenticity.
+    """
+    paystack_signature = request.headers.get("x-paystack-signature")
+    if not paystack_signature:
+        raise HTTPException(status_code=400, detail="Missing Paystack signature header")
+
+    payload_bytes = await request.body()
+
+    # Verify signature
+    expected_signature = hmac.new(
+        PAYSTACK_SECRET_KEY.encode("utf-8"),
+        payload_bytes,
+        hashlib.sha512
+    ).hexdigest()
+
+    if paystack_signature != expected_signature:
+        raise HTTPException(status_code=400, detail="Invalid Paystack signature")
+
+    event_data = await request.json()
+    event_type = event_data.get("event")
+    data = event_data.get("data", {})
+
+    if event_type == "charge.success":
+        reference = data.get("reference")
+        amount_ghs = data.get("amount", 0) / 100
+        customer_phone = data.get("customer", {}).get("phone") or data.get("authorization", {}).get("mobile_money_number")
+        metadata = data.get("metadata", {})
+        description = metadata.get("description", "Direct MoMo Payment")
+
+        print(f"[Paystack Webhook Success] Ref: {reference} | Amount: GHS {amount_ghs} | Phone: {customer_phone} | Description: {description}")
+
+    elif event_type == "charge.failed":
+        reference = data.get("reference")
+        reason = data.get("gateway_response", "Transaction failed")
+        print(f"[Paystack Webhook Failed] Ref: {reference} | Reason: {reason}")
+
+    return {"status": "success"}
 
 # ================= VOICE-TO-TEXT ASYNC ENDPOINTS =================
 @app.post("/api/voice/process", status_code=202)
