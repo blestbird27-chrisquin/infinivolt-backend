@@ -284,7 +284,7 @@ class InstitutionalFeesRequest(BaseModel):
 # ----------------------------------------------------
 # SYSTEM ENDPOINTS
 # ----------------------------------------------------
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
     return {
         "status": "online",
